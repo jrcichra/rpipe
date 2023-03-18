@@ -147,10 +147,10 @@ func main() {
 		g.Add(func() error {
 			log.Printf("listening on %s...\n", args.Addr)
 			server := http.Server{
-				ReadTimeout:       5 * time.Second,
-				WriteTimeout:      5 * time.Second,
-				IdleTimeout:       5 * time.Second,
-				ReadHeaderTimeout: 5 * time.Second,
+				ReadTimeout:       1 * time.Second,
+				WriteTimeout:      1 * time.Second,
+				IdleTimeout:       1 * time.Second,
+				ReadHeaderTimeout: 1 * time.Second,
 				Handler:           mux,
 			}
 			return server.Serve(ln)

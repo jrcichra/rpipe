@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -12,6 +13,24 @@ import (
 	"time"
 )
 
+// keeps track of the previous read
+type CountingReader struct {
+	r        io.Reader
+	previous []byte
+}
+
+func (cr *CountingReader) Read(p []byte) (int, error) {
+	n, err := cr.r.Read(p)
+	// log.Println(len(p))
+	cr.previous = make([]byte, len(p))
+	copy(cr.previous, p)
+	return n, err
+}
+
+func (cr *CountingReader) ReadPrevious() io.Reader {
+	return bytes.NewReader(cr.previous)
+}
+
 type Args struct {
 	Url               string
 	Job               string
@@ -20,10 +39,9 @@ type Args struct {
 }
 
 type Client struct {
-	httpClient http.Client
-	args       Args
-	pipeReader *io.PipeReader
-	pipeWriter *io.PipeWriter
+	httpClient     http.Client
+	args           Args
+	countingReader *CountingReader
 }
 
 func NewClient(args Args) *Client {
@@ -50,7 +68,7 @@ func validate(args Args) error {
 }
 
 func (c *Client) handleHTTPConnection(resume bool) (string, error) {
-	request, err := http.NewRequest("POST", c.args.Url, c.pipeReader)
+	request, err := http.NewRequest("POST", c.args.Url, c.countingReader)
 	if err != nil {
 		return "", err
 	}
@@ -67,7 +85,6 @@ func (c *Client) handleHTTPConnection(resume bool) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-	log.Println(resp.ContentLength)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -79,16 +96,11 @@ func (c *Client) handleHTTPConnection(resume bool) (string, error) {
 func (c *Client) uploadStream() error {
 	resume := false
 	for {
-		c.pipeReader, c.pipeWriter = io.Pipe()
-		go func() {
-			b, err := io.Copy(c.pipeWriter, os.Stdin)
-			if err != nil {
-				log.Printf("iocopy: %d: %v", b, err)
-			} else {
-				// copy is done - close the pipe
-				c.pipeWriter.Close()
-			}
-		}()
+		if resume {
+			c.countingReader = &CountingReader{r: io.MultiReader(c.countingReader.ReadPrevious(), os.Stdin)}
+		} else {
+			c.countingReader = &CountingReader{r: io.MultiReader(os.Stdin)}
+		}
 
 		_, err := c.handleHTTPConnection(resume)
 		if err != nil {
