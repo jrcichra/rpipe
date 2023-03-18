@@ -21,7 +21,6 @@ type CountingReader struct {
 
 func (cr *CountingReader) Read(p []byte) (int, error) {
 	n, err := cr.r.Read(p)
-	// log.Println(len(p))
 	cr.previous = make([]byte, len(p))
 	copy(cr.previous, p)
 	return n, err
