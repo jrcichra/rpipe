@@ -9,24 +9,28 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
-func newfileUploadRequest(args Args) (*http.Request, error) {
-	r, w := io.Pipe()
+type Args struct {
+	Url               string
+	Job               string
+	Command           string
+	AdditionalHeaders string
+}
 
-	request, err := http.NewRequest("POST", args.Url, r)
-	if err != nil {
-		return nil, err
+type Client struct {
+	httpClient http.Client
+	args       Args
+	pipeReader *io.PipeReader
+	pipeWriter *io.PipeWriter
+}
+
+func NewClient(args Args) *Client {
+	return &Client{
+		httpClient: http.Client{Timeout: 5 * time.Second},
+		args:       args,
 	}
-	go func() {
-		_, err := io.Copy(w, os.Stdin)
-		w.CloseWithError(err)
-	}()
-
-	request.Header.Set("Job", args.Job)
-	request.Header.Set("Command", args.Command)
-	request.Header.Set("Content-Type", "application/octet-stream")
-	return request, nil
 }
 
 func validate(args Args) error {
@@ -45,10 +49,60 @@ func validate(args Args) error {
 	return nil
 }
 
-type Args struct {
-	Url     string
-	Job     string
-	Command string
+func (c *Client) handleHTTPConnection(resume bool) (string, error) {
+	request, err := http.NewRequest("POST", c.args.Url, c.pipeReader)
+	if err != nil {
+		return "", err
+	}
+	client := &http.Client{}
+	request.Header.Set("Job", c.args.Job)
+	request.Header.Set("Command", c.args.Command)
+	if resume {
+		request.Header.Set("Resume", "yes")
+	}
+	request.Header.Set("Content-Type", "application/octet-stream")
+
+	resp, err := client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	log.Println(resp.ContentLength)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+func (c *Client) uploadStream() error {
+	resume := false
+	for {
+		c.pipeReader, c.pipeWriter = io.Pipe()
+		go func() {
+			b, err := io.Copy(c.pipeWriter, os.Stdin)
+			if err != nil {
+				log.Printf("iocopy: %d: %v", b, err)
+			} else {
+				// copy is done - close the pipe
+				c.pipeWriter.Close()
+			}
+		}()
+
+		_, err := c.handleHTTPConnection(resume)
+		if err != nil {
+			// something went wrong with the http connection
+			// spin up a new one marked as resume
+			log.Println(err)
+			resume = true
+		} else {
+			// no error - data transfer must have completed successfully
+			return nil
+		}
+		// give some time between requests
+		time.Sleep(1 * time.Second)
+	}
 }
 
 func main() {
@@ -60,20 +114,10 @@ func main() {
 	if err := validate(args); err != nil {
 		log.Fatalln(err)
 	}
-	r, err := newfileUploadRequest(args)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	client := &http.Client{}
 
-	resp, err := client.Do(r)
-
-	if err != nil {
+	client := NewClient(args)
+	if err := client.uploadStream(); err != nil {
 		log.Fatalln(err)
 	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	log.Println(string(body))
+	log.Println("file transfer complete")
 }

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strings"
+	"time"
 
 	"github.com/oklog/run"
 )
@@ -45,8 +46,9 @@ func (s *Server) do(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// get the job and command
-	jobName := r.Header["Job"][0]
-	command := r.Header["Command"][0]
+	jobName := r.Header.Get("Job")
+	command := r.Header.Get("Command")
+	resume := r.Header.Get("Resume")
 
 	job, ok := s.Jobs[jobName]
 	// have we seen this job before?
@@ -65,24 +67,28 @@ func (s *Server) do(w http.ResponseWriter, r *http.Request) {
 		job.Stdin, err = job.CommandHandler.StdinPipe()
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			log.Printf("sent error: %v", err)
+			log.Printf("sent error 1: %v", err)
 			w.Write([]byte(err.Error()))
 			return
 		}
 	}
 
-	// start the job
-	if err := job.CommandHandler.Start(); nil != err {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("sent error: %v", err)
-		w.Write([]byte(err.Error()))
-		return
+	log.Printf("processing job %s...", jobName)
+
+	// start the job if we haven't already
+	if resume != "yes" {
+		if err := job.CommandHandler.Start(); nil != err {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Printf("sent error 2: %v", err)
+			w.Write([]byte(err.Error()))
+			return
+		}
 	}
 
 	// copy data to command program
-	if _, err := io.Copy(job.Stdin, r.Body); err != nil {
-		w.WriteHeader(http.StatusPartialContent)
-		log.Printf("sent error: %v", err)
+	if b, err := io.Copy(job.Stdin, r.Body); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("sent error 3: %d: %v", b, err)
 		w.Write([]byte(err.Error()))
 		return
 	}
@@ -90,7 +96,7 @@ func (s *Server) do(w http.ResponseWriter, r *http.Request) {
 	// copy is done, close pipe
 	if err := job.Stdin.Close(); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("sent error: %v", err)
+		log.Printf("sent error 5:  %v", err)
 		w.Write([]byte(err.Error()))
 		return
 	}
@@ -100,15 +106,15 @@ func (s *Server) do(w http.ResponseWriter, r *http.Request) {
 	// wait for the job to finish
 	if err := job.CommandHandler.Wait(); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("sent error: %v", err)
+		log.Printf("sent error 5: %v", err)
 		w.Write([]byte(err.Error()))
 		return
 	}
 
 	// success
 	w.WriteHeader(http.StatusOK)
-	log.Printf("completed")
-	w.Write([]byte("completed"))
+	log.Printf("finished processing job %s", jobName)
+	w.Write([]byte("ok"))
 }
 
 func main() {
@@ -140,7 +146,14 @@ func main() {
 		}
 		g.Add(func() error {
 			log.Printf("listening on %s...\n", args.Addr)
-			return http.Serve(ln, mux)
+			server := http.Server{
+				ReadTimeout:       5 * time.Second,
+				WriteTimeout:      5 * time.Second,
+				IdleTimeout:       5 * time.Second,
+				ReadHeaderTimeout: 5 * time.Second,
+				Handler:           mux,
+			}
+			return server.Serve(ln)
 		}, func(err error) {
 			ln.Close()
 		})
