@@ -10,24 +10,39 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/cenkalti/backoff/v4"
 )
 
 // keeps track of the previous read
 type CountingReader struct {
-	r        io.Reader
-	previous []byte
+	r            io.Reader
+	previous     []byte
+	previousLock sync.RWMutex
+	tempPrevious []byte
 }
 
 func (cr *CountingReader) Read(p []byte) (int, error) {
+	cr.previousLock.Lock()
+	defer cr.previousLock.Unlock()
+	if len(cr.previous) != len(p) {
+		cr.previous = make([]byte, len(p))
+	}
 	n, err := cr.r.Read(p)
-	cr.previous = make([]byte, len(p))
 	copy(cr.previous, p)
 	return n, err
 }
 
 func (cr *CountingReader) ReadPrevious() io.Reader {
-	return bytes.NewReader(cr.previous)
+	cr.previousLock.RLock()
+	defer cr.previousLock.RUnlock()
+	if len(cr.previous) != len(cr.tempPrevious) {
+		cr.tempPrevious = make([]byte, len(cr.previous))
+	}
+	copy(cr.tempPrevious, cr.previous)
+	return bytes.NewReader(cr.tempPrevious)
 }
 
 type Args struct {
@@ -38,9 +53,8 @@ type Args struct {
 }
 
 type Client struct {
-	httpClient     http.Client
-	args           Args
-	countingReader *CountingReader
+	httpClient http.Client
+	args       Args
 }
 
 func NewClient(args Args) *Client {
@@ -66,8 +80,8 @@ func validate(args Args) error {
 	return nil
 }
 
-func (c *Client) handleHTTPConnection(resume bool) (string, error) {
-	request, err := http.NewRequest("POST", c.args.Url, c.countingReader)
+func (c *Client) handleHTTPConnection(resume bool, reader io.Reader) (string, error) {
+	request, err := http.NewRequest("POST", c.args.Url, reader)
 	if err != nil {
 		return "", err
 	}
@@ -83,37 +97,43 @@ func (c *Client) handleHTTPConnection(resume bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
-	return string(body), nil
+
+	return string(body), err
 }
 
 func (c *Client) uploadStream() error {
 	resume := false
-	for {
+	countingReader := &CountingReader{}
+	b := backoff.NewExponentialBackOff()
+	b.MaxElapsedTime = 0
+
+	return backoff.Retry(func() error {
 		if resume {
-			c.countingReader = &CountingReader{r: io.MultiReader(c.countingReader.ReadPrevious(), os.Stdin)}
+			log.Println("resuming connection...")
+			countingReader.r = io.MultiReader(countingReader.ReadPrevious(), os.Stdin)
 		} else {
-			c.countingReader = &CountingReader{r: io.MultiReader(os.Stdin)}
+			log.Println("starting connection...")
+			countingReader.r = os.Stdin
 		}
 
-		_, err := c.handleHTTPConnection(resume)
-		if err != nil {
+		responseBody, err := c.handleHTTPConnection(resume, countingReader)
+		if err != nil || responseBody != "ok" {
 			// something went wrong with the http connection
-			// spin up a new one marked as resume
-			log.Println(err)
 			resume = true
-		} else {
-			// no error - data transfer must have completed successfully
-			return nil
+			if err == nil {
+				err = fmt.Errorf(responseBody)
+			}
+			log.Println(err)
+			return err
 		}
-		// give some time between requests
-		time.Sleep(1 * time.Second)
-	}
+		// no error - data transfer must have completed successfully
+		return nil
+	}, b)
 }
 
 func main() {

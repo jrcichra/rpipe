@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/oklog/run"
@@ -20,12 +21,13 @@ type Args struct {
 	Daemon      bool
 	Addr        string
 	MetricsAddr string
+	HTTPTimeout time.Duration // mainly used for testing connection breakages
 }
 
 type Job struct {
-	Command        string
 	CommandHandler *exec.Cmd
 	Stdin          io.WriteCloser
+	Lock           sync.Mutex
 }
 
 type Server struct {
@@ -57,7 +59,6 @@ func (s *Server) do(w http.ResponseWriter, r *http.Request) {
 		// start a new job
 		job = &Job{
 			CommandHandler: exec.Command(splitCommand[0], splitCommand[1:]...),
-			Command:        command,
 		}
 		// associate it
 		s.Jobs[jobName] = job
@@ -73,7 +74,11 @@ func (s *Server) do(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	log.Printf("processing job %s...", jobName)
+	// lock the job so only one client can interact with this connection at a time
+	job.Lock.Lock()
+	defer job.Lock.Unlock()
+
+	log.Printf("processing job %+v...", job)
 
 	// start the job if we haven't already
 	if resume != "yes" {
@@ -86,10 +91,19 @@ func (s *Server) do(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// copy data to command program
-	if b, err := io.Copy(job.Stdin, r.Body); err != nil {
+	b, err := io.Copy(job.Stdin, r.Body)
+
+	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		log.Printf("sent error 3: %d: %v", b, err)
 		w.Write([]byte(err.Error()))
+		return
+	}
+
+	if b <= 0 {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("sent error 4: %d: %s", b, "no body found")
+		w.Write([]byte("no body found"))
 		return
 	}
 
@@ -106,7 +120,7 @@ func (s *Server) do(w http.ResponseWriter, r *http.Request) {
 	// wait for the job to finish
 	if err := job.CommandHandler.Wait(); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("sent error 5: %v", err)
+		log.Printf("sent error 6: %v", err)
 		w.Write([]byte(err.Error()))
 		return
 	}
@@ -122,6 +136,7 @@ func main() {
 	flag.BoolVar(&args.Daemon, "daemon", false, "run as daemon executing commands")
 	flag.StringVar(&args.Addr, "bind", ":8000", "bind addr for rpipe jobs")
 	flag.StringVar(&args.MetricsAddr, "metrics", ":2100", "bind addr for metrics")
+	flag.DurationVar(&args.HTTPTimeout, "timeout", 0, "http connection timeout (used primarily for testing, default = none)")
 	flag.Parse()
 
 	var g run.Group
@@ -147,10 +162,10 @@ func main() {
 		g.Add(func() error {
 			log.Printf("listening on %s...\n", args.Addr)
 			server := http.Server{
-				ReadTimeout:       1 * time.Second,
-				WriteTimeout:      1 * time.Second,
-				IdleTimeout:       1 * time.Second,
-				ReadHeaderTimeout: 1 * time.Second,
+				ReadTimeout:       args.HTTPTimeout,
+				WriteTimeout:      args.HTTPTimeout,
+				IdleTimeout:       args.HTTPTimeout,
+				ReadHeaderTimeout: args.HTTPTimeout,
 				Handler:           mux,
 			}
 			return server.Serve(ln)
@@ -163,5 +178,4 @@ func main() {
 	if err := g.Run(); err != nil {
 		log.Println(err)
 	}
-
 }
