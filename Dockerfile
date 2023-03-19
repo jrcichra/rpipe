@@ -3,6 +3,6 @@ WORKDIR /build
 COPY . .
 RUN ./build.sh
 FROM scratch
-COPY --from=builder /bin/rpiped /rpiped
-COPY --from=builder /bin/rpipe /rpipe
+COPY --from=builder /build/bin/rpiped /rpiped
+COPY --from=builder /build/bin/rpipe /rpipe
 # other containers will pull in these builds
