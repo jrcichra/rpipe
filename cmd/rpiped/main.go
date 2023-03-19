@@ -14,7 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"net/http/pprof"
+
 	"github.com/oklog/run"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type Args struct {
@@ -131,6 +134,15 @@ func (s *Server) do(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ok"))
 }
 
+// RegisterDebugHandlers registers debug handlers with the mux
+func RegisterDebugHandlers(mux *http.ServeMux) {
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+}
+
 func main() {
 	var args Args
 	flag.BoolVar(&args.Daemon, "daemon", false, "run as daemon executing commands")
@@ -169,6 +181,23 @@ func main() {
 				Handler:           mux,
 			}
 			return server.Serve(ln)
+		}, func(err error) {
+			ln.Close()
+		})
+	}
+
+	{
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		RegisterDebugHandlers(mux)
+
+		ln, err := net.Listen("tcp", args.MetricsAddr)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		g.Add(func() error {
+			log.Printf("listening for metrics and debug on %s...\n", args.MetricsAddr)
+			return http.Serve(ln, mux)
 		}, func(err error) {
 			ln.Close()
 		})
