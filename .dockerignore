@@ -1,4 +1,3 @@
 .dockerignore
 .gitignore
-bin/
 README.md
