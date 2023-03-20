@@ -53,14 +53,25 @@ type Args struct {
 }
 
 type Client struct {
-	httpClient http.Client
-	args       Args
+	httpClient        http.Client
+	args              Args
+	additionalHeaders map[string]string
 }
 
 func NewClient(args Args) *Client {
+	// build headers
+	headersAndValues := strings.Split(args.AdditionalHeaders, ",")
+	additionalHeaders := make(map[string]string, len(headersAndValues))
+
+	for _, headerAndValue := range headersAndValues {
+		headerAndValueSplit := strings.Split(headerAndValue, "=")
+		additionalHeaders[headerAndValueSplit[0]] = headerAndValueSplit[1]
+	}
+
 	return &Client{
-		httpClient: http.Client{Timeout: 5 * time.Second},
-		args:       args,
+		httpClient:        http.Client{Timeout: 5 * time.Second},
+		args:              args,
+		additionalHeaders: additionalHeaders,
 	}
 }
 
@@ -92,6 +103,11 @@ func (c *Client) handleHTTPConnection(resume bool, reader io.Reader) (string, er
 		request.Header.Set("Resume", "yes")
 	}
 	request.Header.Set("Content-Type", "application/octet-stream")
+
+	// add additional headers if here are any
+	for key, value := range c.additionalHeaders {
+		request.Header.Set(key, value)
+	}
 
 	resp, err := client.Do(request)
 	if err != nil {
@@ -141,6 +157,7 @@ func main() {
 	flag.StringVar(&args.Url, "url", "", "url of rpiped")
 	flag.StringVar(&args.Job, "job", "", "name of job (to resume in the future)")
 	flag.StringVar(&args.Command, "command", "", "command to run on rpiped")
+	flag.StringVar(&args.AdditionalHeaders, "headers", "", "additional headers")
 	flag.Parse()
 	if err := validate(args); err != nil {
 		log.Fatalln(err)

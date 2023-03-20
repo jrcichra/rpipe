@@ -1,1 +1,3 @@
 # rpipe
+
+Resilient Pipes.
