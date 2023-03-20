@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/google/uuid"
 )
 
 // keeps track of the previous read
@@ -47,7 +48,6 @@ func (cr *CountingReader) ReadPrevious() io.Reader {
 
 type Args struct {
 	Url               string
-	Job               string
 	Command           string
 	AdditionalHeaders string
 }
@@ -60,12 +60,13 @@ type Client struct {
 
 func NewClient(args Args) *Client {
 	// build headers
-	headersAndValues := strings.Split(args.AdditionalHeaders, ",")
-	additionalHeaders := make(map[string]string, len(headersAndValues))
-
-	for _, headerAndValue := range headersAndValues {
-		headerAndValueSplit := strings.Split(headerAndValue, "=")
-		additionalHeaders[headerAndValueSplit[0]] = headerAndValueSplit[1]
+	additionalHeaders := make(map[string]string)
+	if args.AdditionalHeaders != "" {
+		headersAndValues := strings.Split(args.AdditionalHeaders, ",")
+		for _, headerAndValue := range headersAndValues {
+			headerAndValueSplit := strings.Split(headerAndValue, "=")
+			additionalHeaders[headerAndValueSplit[0]] = headerAndValueSplit[1]
+		}
 	}
 
 	return &Client{
@@ -80,10 +81,6 @@ func validate(args Args) error {
 	if _, err := url.ParseRequestURI(args.Url); err != nil {
 		return err
 	}
-	// valid job name
-	if strings.TrimSpace(args.Job) == "" {
-		return fmt.Errorf("invalid job name")
-	}
 	// valid command
 	if strings.TrimSpace(args.Command) == "" {
 		return fmt.Errorf("invalid command")
@@ -97,7 +94,7 @@ func (c *Client) handleHTTPConnection(resume bool, reader io.Reader) (string, er
 		return "", err
 	}
 	client := &http.Client{}
-	request.Header.Set("Job", c.args.Job)
+	request.Header.Set("Job", uuid.New().String())
 	request.Header.Set("Command", c.args.Command)
 	if resume {
 		request.Header.Set("Resume", "yes")
@@ -155,7 +152,6 @@ func (c *Client) uploadStream() error {
 func main() {
 	var args Args
 	flag.StringVar(&args.Url, "url", "", "url of rpiped")
-	flag.StringVar(&args.Job, "job", "", "name of job (to resume in the future)")
 	flag.StringVar(&args.Command, "command", "", "command to run on rpiped")
 	flag.StringVar(&args.AdditionalHeaders, "headers", "", "additional headers")
 	flag.Parse()
