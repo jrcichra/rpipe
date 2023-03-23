@@ -109,6 +109,7 @@ func (c *Client) handleHTTPSession(jobID string, reader *bufio.Reader) error {
 			request.Header.Set(key, value)
 		}
 
+		log.Println("uploading chunk...")
 		resp, err := client.Do(request)
 		if err != nil {
 			return err
@@ -125,6 +126,7 @@ func (c *Client) handleHTTPSession(jobID string, reader *bufio.Reader) error {
 		if _, err := reader.Discard(c.args.ChunkSize); err != nil {
 			return err
 		}
+		log.Println("successfully uploaded chunk")
 	}
 }
 
@@ -141,6 +143,8 @@ func (c *Client) uploadStream() error {
 					// we've hit the end
 					return nil
 				}
+				// something else went wrong with the session
+				log.Println(err)
 				return err
 			}
 			// hit the end in some other way

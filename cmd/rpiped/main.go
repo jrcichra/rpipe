@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -30,7 +31,31 @@ type Args struct {
 type Job struct {
 	CommandHandler *exec.Cmd
 	Stdin          io.WriteCloser
+	Stdout         io.ReadCloser
+	StdErr         io.ReadCloser
 	Lock           sync.Mutex
+	Name           string
+}
+
+func (j *Job) StartAndPrintOutput() error {
+	if err := j.CommandHandler.Start(); err != nil {
+		return err
+	}
+	// handle stdout until it's done
+	go func() {
+		scanner := bufio.NewScanner(j.Stdout)
+		for scanner.Scan() {
+			log.Printf("job %s stdout: %s", j.Name, scanner.Text())
+		}
+	}()
+	// handle stderr until it's done
+	go func() {
+		scanner := bufio.NewScanner(j.StdErr)
+		for scanner.Scan() {
+			log.Printf("job %s stderr: %s", j.Name, scanner.Text())
+		}
+	}()
+	return nil
 }
 
 type Server struct {
@@ -61,8 +86,6 @@ func (s *Server) done(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// delete it from the map
-	delete(s.Jobs, jobName)
 	// wait for the job to finish
 	if err := job.CommandHandler.Wait(); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -70,6 +93,9 @@ func (s *Server) done(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(err.Error()))
 		return
 	}
+
+	// delete it from the map
+	delete(s.Jobs, jobName)
 
 	// successful done
 	w.WriteHeader(http.StatusOK)
@@ -95,6 +121,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		splitCommand := strings.Split(command, " ")
 		// build a new job
 		job = &Job{
+			Name:           jobName,
 			CommandHandler: exec.Command(splitCommand[0], splitCommand[1:]...),
 		}
 		s.Jobs[jobName] = job
@@ -104,14 +131,31 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		job.Stdin, err = job.CommandHandler.StdinPipe()
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			log.Printf("sent error 1: %v", err)
+			log.Printf("sent error stdin: %v", err)
+			w.Write([]byte(err.Error()))
+			return
+		}
+		// grab stdout
+		job.Stdout, err = job.CommandHandler.StdoutPipe()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Printf("sent error stdout: %v", err)
+			w.Write([]byte(err.Error()))
+			return
+		}
+
+		// grab stderr
+		job.StdErr, err = job.CommandHandler.StderrPipe()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Printf("sent error stdout: %v", err)
 			w.Write([]byte(err.Error()))
 			return
 		}
 
 		// start the job
 		log.Printf("starting job %+v...", job)
-		if err := job.CommandHandler.Start(); nil != err {
+		if err := job.StartAndPrintOutput(); nil != err {
 			w.WriteHeader(http.StatusInternalServerError)
 			log.Printf("sent error 2: %v", err)
 			w.Write([]byte(err.Error()))
