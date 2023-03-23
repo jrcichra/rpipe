@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -10,46 +12,17 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/google/uuid"
 )
 
-// keeps track of the previous read
-type CountingReader struct {
-	r            io.Reader
-	previous     []byte
-	previousLock sync.RWMutex
-	tempPrevious []byte
-}
-
-func (cr *CountingReader) Read(p []byte) (int, error) {
-	cr.previousLock.Lock()
-	defer cr.previousLock.Unlock()
-	if len(cr.previous) != len(p) {
-		cr.previous = make([]byte, len(p))
-	}
-	n, err := cr.r.Read(p)
-	copy(cr.previous, p)
-	return n, err
-}
-
-func (cr *CountingReader) ReadPrevious() io.Reader {
-	cr.previousLock.RLock()
-	defer cr.previousLock.RUnlock()
-	if len(cr.previous) != len(cr.tempPrevious) {
-		cr.tempPrevious = make([]byte, len(cr.previous))
-	}
-	copy(cr.tempPrevious, cr.previous)
-	return bytes.NewReader(cr.tempPrevious)
-}
-
 type Args struct {
 	Url               string
 	Command           string
 	AdditionalHeaders string
+	ChunkSize         int
 }
 
 type Client struct {
@@ -88,18 +61,13 @@ func validate(args Args) error {
 	return nil
 }
 
-func (c *Client) handleHTTPConnection(resume bool, reader io.Reader) (string, error) {
-	request, err := http.NewRequest("POST", c.args.Url, reader)
+func (c *Client) sendDone(jobID string) error {
+	request, err := http.NewRequest("POST", c.args.Url+"/done", nil)
 	if err != nil {
-		return "", err
+		return err
 	}
-	client := &http.Client{}
-	request.Header.Set("Job", uuid.New().String())
-	request.Header.Set("Command", c.args.Command)
-	if resume {
-		request.Header.Set("Resume", "yes")
-	}
-	request.Header.Set("Content-Type", "application/octet-stream")
+	var client http.Client
+	request.Header.Set("Job", jobID)
 
 	// add additional headers if here are any
 	for key, value := range c.additionalHeaders {
@@ -108,45 +76,92 @@ func (c *Client) handleHTTPConnection(resume bool, reader io.Reader) (string, er
 
 	resp, err := client.Do(request)
 	if err != nil {
-		return "", err
+		return err
 	}
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return err
 	}
+	if string(body) != "ok" {
+		return errors.New("did not receive ok from server")
+	}
+	return nil
+}
 
-	return string(body), err
+func (c *Client) handleHTTPSession(jobID string, reader *bufio.Reader) error {
+	for {
+		buffer, err := reader.Peek(c.args.ChunkSize)
+		if err != nil && len(buffer) == 0 {
+			return err
+		}
+		chunkReader := bytes.NewReader(buffer)
+		request, err := http.NewRequest("POST", c.args.Url+"/upload", chunkReader)
+		if err != nil {
+			return err
+		}
+		var client http.Client
+		request.Header.Set("Job", jobID)
+		request.Header.Set("Command", c.args.Command)
+		request.Header.Set("Content-Type", "application/octet-stream")
+
+		// add additional headers if here are any
+		for key, value := range c.additionalHeaders {
+			request.Header.Set(key, value)
+		}
+
+		resp, err := client.Do(request)
+		if err != nil {
+			return err
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+		if string(body) != "ok" {
+			return errors.New("did not receive ok from server")
+		}
+		// discard what was peeked
+		if _, err := reader.Discard(c.args.ChunkSize); err != nil {
+			return err
+		}
+	}
 }
 
 func (c *Client) uploadStream() error {
-	resume := false
-	countingReader := &CountingReader{}
-	b := backoff.NewExponentialBackOff()
-	b.MaxElapsedTime = 0
-
-	return backoff.Retry(func() error {
-		if resume {
-			log.Println("resuming connection...")
-			countingReader.r = io.MultiReader(countingReader.ReadPrevious(), os.Stdin)
-		} else {
-			log.Println("starting connection...")
-			countingReader.r = os.Stdin
-		}
-
-		responseBody, err := c.handleHTTPConnection(resume, countingReader)
-		if err != nil || responseBody != "ok" {
-			// something went wrong with the http connection
-			resume = true
-			if err == nil {
-				err = fmt.Errorf(responseBody)
+	jobID := uuid.New().String()
+	stdinReader := bufio.NewReaderSize(os.Stdin, c.args.ChunkSize)
+	// send all the data
+	{
+		b := backoff.NewExponentialBackOff()
+		b.MaxElapsedTime = 0
+		backoff.Retry(func() error {
+			if err := c.handleHTTPSession(jobID, stdinReader); err != nil {
+				if err == io.EOF {
+					// we've hit the end
+					return nil
+				}
+				return err
 			}
-			log.Println(err)
-			return err
-		}
-		// no error - data transfer must have completed successfully
-		return nil
-	}, b)
+			// hit the end in some other way
+			log.Println("shouldn't be here")
+			return nil
+		}, b)
+	}
+
+	// tell the server we're done
+	{
+		b := backoff.NewExponentialBackOff()
+		b.MaxElapsedTime = 0
+		backoff.Retry(func() error {
+			if err := c.sendDone(jobID); err != nil {
+				log.Println(err)
+			}
+			// no error - server must know we're done
+			return nil
+		}, b)
+	}
+	return nil
 }
 
 func main() {
@@ -154,7 +169,9 @@ func main() {
 	flag.StringVar(&args.Url, "url", "", "url of rpiped")
 	flag.StringVar(&args.Command, "command", "", "command to run on rpiped")
 	flag.StringVar(&args.AdditionalHeaders, "headers", "", "additional headers")
+	flag.IntVar(&args.ChunkSize, "chunk-size", 10, "chunk size (in MB) for requests")
 	flag.Parse()
+	args.ChunkSize *= 1024 * 1024
 	if err := validate(args); err != nil {
 		log.Fatalln(err)
 	}

@@ -43,73 +43,16 @@ func NewServer() *Server {
 	}
 }
 
-func (s *Server) do(w http.ResponseWriter, r *http.Request) {
-	// make sure it's a post
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
-	// get the job and command
+func (s *Server) done(w http.ResponseWriter, r *http.Request) {
 	jobName := r.Header.Get("Job")
-	command := r.Header.Get("Command")
-	resume := r.Header.Get("Resume")
-
 	job, ok := s.Jobs[jobName]
-	// have we seen this job before?
 	if !ok {
-		splitCommand := strings.Split(command, " ")
-		// start a new job
-		job = &Job{
-			CommandHandler: exec.Command(splitCommand[0], splitCommand[1:]...),
-		}
-		// associate it
-		s.Jobs[jobName] = job
-
-		// grab stdin
-		var err error
-		job.Stdin, err = job.CommandHandler.StdinPipe()
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			log.Printf("sent error 1: %v", err)
-			w.Write([]byte(err.Error()))
-			return
-		}
-	}
-
-	// lock the job so only one client can interact with this connection at a time
-	job.Lock.Lock()
-	defer job.Lock.Unlock()
-
-	log.Printf("processing job %+v...", job)
-
-	// start the job if we haven't already
-	if resume != "yes" {
-		if err := job.CommandHandler.Start(); nil != err {
-			w.WriteHeader(http.StatusInternalServerError)
-			log.Printf("sent error 2: %v", err)
-			w.Write([]byte(err.Error()))
-			return
-		}
-	}
-
-	// copy data to command program
-	b, err := io.Copy(job.Stdin, r.Body)
-
-	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("sent error 3: %d: %v", b, err)
-		w.Write([]byte(err.Error()))
+		msg := "cannot call done on job which doesnt exist"
+		log.Println(msg)
+		w.Write([]byte(msg))
 		return
 	}
-
-	if b <= 0 {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("sent error 4: %d: %s", b, "no body found")
-		w.Write([]byte("no body found"))
-		return
-	}
-
 	// copy is done, close pipe
 	if err := job.Stdin.Close(); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -128,9 +71,80 @@ func (s *Server) do(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// success
+	// successful done
 	w.WriteHeader(http.StatusOK)
 	log.Printf("finished processing job %s", jobName)
+	w.Write([]byte("ok"))
+}
+
+func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
+	// make sure it's a post
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	// get the job and command
+	jobName := r.Header.Get("Job")
+	command := r.Header.Get("Command")
+
+	job, ok := s.Jobs[jobName]
+	// have we seen this job before?
+	// no - we need to do some prep-work
+	if !ok {
+		splitCommand := strings.Split(command, " ")
+		// build a new job
+		job = &Job{
+			CommandHandler: exec.Command(splitCommand[0], splitCommand[1:]...),
+		}
+		s.Jobs[jobName] = job
+
+		// grab stdin
+		var err error
+		job.Stdin, err = job.CommandHandler.StdinPipe()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Printf("sent error 1: %v", err)
+			w.Write([]byte(err.Error()))
+			return
+		}
+
+		// start the job
+		log.Printf("starting job %+v...", job)
+		if err := job.CommandHandler.Start(); nil != err {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Printf("sent error 2: %v", err)
+			w.Write([]byte(err.Error()))
+			return
+		}
+	}
+
+	// lock the job so only one request can interact with this job at a time
+	job.Lock.Lock()
+	defer job.Lock.Unlock()
+
+	// log.Printf("processing chunk for job %+v...", job)
+
+	// copy data to command program
+	b, err := io.Copy(job.Stdin, r.Body)
+
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("sent error 3: %d: %v", b, err)
+		w.Write([]byte(err.Error()))
+		return
+	}
+
+	if b <= 0 {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("sent error 4: %d: %s", b, "no body found")
+		w.Write([]byte("no body found"))
+		return
+	}
+
+	// successful chunk
+	w.WriteHeader(http.StatusOK)
+	log.Printf("finished processing chunk for job %s. size: %d", jobName, b)
 	w.Write([]byte("ok"))
 }
 
@@ -165,7 +179,8 @@ func main() {
 	{
 		s := NewServer()
 		mux := http.NewServeMux()
-		mux.HandleFunc("/", s.do)
+		mux.HandleFunc("/upload", s.upload)
+		mux.HandleFunc("/done", s.done)
 
 		ln, err := net.Listen("tcp", args.Addr)
 		if err != nil {
