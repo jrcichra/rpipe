@@ -137,6 +137,7 @@ func (c *Client) uploadStream() error {
 	{
 		b := backoff.NewExponentialBackOff()
 		b.MaxElapsedTime = 0
+		b.MaxInterval = time.Minute * 1
 		backoff.Retry(func() error {
 			if err := c.handleHTTPSession(jobID, stdinReader); err != nil {
 				if err == io.EOF {
@@ -157,6 +158,7 @@ func (c *Client) uploadStream() error {
 	{
 		b := backoff.NewExponentialBackOff()
 		b.MaxElapsedTime = 0
+		b.MaxInterval = time.Minute * 1
 		backoff.Retry(func() error {
 			if err := c.sendDone(jobID); err != nil {
 				log.Println(err)
