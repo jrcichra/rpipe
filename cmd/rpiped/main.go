@@ -179,7 +179,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	// log.Printf("processing chunk for job %+v...", job)
 
 	// copy data to temporary buffer before sending to the application (in case the http request fails midway through)
-	buffer := bytes.NewBuffer(make([]byte, chunkSize))
+	buffer := bytes.NewBuffer(make([]byte, 0, chunkSize))
 	b, err := io.Copy(buffer, r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
