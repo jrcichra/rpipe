@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -113,6 +115,13 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	// get the job and command
 	jobName := r.Header.Get("Job")
 	command := r.Header.Get("Command")
+	chunkSize, err := strconv.Atoi(r.Header.Get("Chunk-Size"))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("sent error stdin: %v", err)
+		w.Write([]byte(err.Error()))
+		return
+	}
 
 	job, ok := s.Jobs[jobName]
 	// have we seen this job before?
@@ -169,9 +178,9 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 
 	// log.Printf("processing chunk for job %+v...", job)
 
-	// copy data to command program
-	b, err := io.Copy(job.Stdin, r.Body)
-
+	// copy data to temporary buffer before sending to the application (in case the http request fails midway through)
+	buffer := bytes.NewBuffer(make([]byte, chunkSize))
+	b, err := io.Copy(buffer, r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		log.Printf("sent error 3: %d: %v", b, err)
@@ -186,10 +195,33 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if b != int64(chunkSize) {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("sent error 5: unexpected number of bytes. expected: %d, got: %d", chunkSize, b)
+		w.Write([]byte("unexpected number of bytes"))
+		return
+	}
+
+	// pass the data to the program
+	b, err = io.Copy(job.Stdin, buffer)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("sent error 6: %d: %v", b, err)
+		w.Write([]byte(err.Error()))
+		return
+	}
+	if b <= 0 || b != int64(chunkSize) {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("sent error 7: could not send all bytes from buffer to job stdin. chunkSize: %d, b: %d", chunkSize, b)
+		w.Write([]byte("could not send all bytes from buffer to job stdin"))
+		return
+	}
+
 	// successful chunk
 	w.WriteHeader(http.StatusOK)
 	log.Printf("finished processing chunk for job %s. size: %d", jobName, b)
 	w.Write([]byte("ok"))
+
 }
 
 // RegisterDebugHandlers registers debug handlers with the mux

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -102,6 +103,7 @@ func (c *Client) handleHTTPSession(jobID string, reader *bufio.Reader) error {
 		var client http.Client
 		request.Header.Set("Job", jobID)
 		request.Header.Set("Command", c.args.Command)
+		request.Header.Set("Chunk-Size", strconv.Itoa(c.args.ChunkSize))
 		request.Header.Set("Content-Type", "application/octet-stream")
 
 		// add additional headers if here are any
