@@ -17,6 +17,8 @@ jobs:
       - uses: actions/setup-go@v4
         with:
           go-version: "1.20.2"
+      - name: install pv
+        run: sudo apt-get update && sudo apt-get install -y pv
       - name: Build Go binaries
         run: ./build.sh
       - name: Test
