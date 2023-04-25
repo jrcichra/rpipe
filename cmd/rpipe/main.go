@@ -100,10 +100,11 @@ func (c *Client) handleHTTPSession(jobID string, reader *bufio.Reader) error {
 		if err != nil {
 			return err
 		}
+		chunkLen := chunkReader.Len()
 		var client http.Client
 		request.Header.Set("Job", jobID)
 		request.Header.Set("Command", c.args.Command)
-		request.Header.Set("Chunk-Size", strconv.Itoa(c.args.ChunkSize))
+		request.Header.Set("Chunk-Size", strconv.Itoa(chunkLen))
 		request.Header.Set("Content-Type", "application/octet-stream")
 
 		// add additional headers if here are any
@@ -125,7 +126,7 @@ func (c *Client) handleHTTPSession(jobID string, reader *bufio.Reader) error {
 			return errors.New("did not receive ok from server")
 		}
 		// discard what was peeked
-		if _, err := reader.Discard(c.args.ChunkSize); err != nil {
+		if _, err := reader.Discard(chunkLen); err != nil {
 			return err
 		}
 		log.Println("successfully uploaded chunk")
