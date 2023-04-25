@@ -9,7 +9,7 @@ input_sha=$(sha256sum ${workdir}/input.img | awk '{print $1}')
 
 bin/rpiped-linux-amd64 -timeout 1s &
 rpiped_pid=$!
-cat ${workdir}/input.img | bin/rpipe-linux-amd64 -url http://127.0.0.1:8000 -command "tee ${workdir}/output.img" &
+cat ${workdir}/input.img | bin/rpipe-linux-amd64 -url http://127.0.0.1:8000 -command "pv > ${workdir}/output.img" &
 rpipe_pid=$!
 
 wait ${rpipe_pid}

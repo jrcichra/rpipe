@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -127,11 +126,10 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	// have we seen this job before?
 	// no - we need to do some prep-work
 	if !ok {
-		splitCommand := strings.Split(command, " ")
 		// build a new job
 		job = &Job{
 			Name:           jobName,
-			CommandHandler: exec.Command(splitCommand[0], splitCommand[1:]...),
+			CommandHandler: exec.Command("sh", "-c", command),
 		}
 		s.Jobs[jobName] = job
 
