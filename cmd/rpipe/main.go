@@ -24,6 +24,7 @@ type Args struct {
 	Command           string
 	AdditionalHeaders string
 	ChunkSize         int
+	ResumeJobID       string
 }
 
 type Client struct {
@@ -162,14 +163,68 @@ func (c *Client) newJob() (string, error) {
 	return sBody, nil
 }
 
-func (c *Client) uploadStream() error {
-	// start a new job (getting the uuid for it)
-	jobID, err := c.newJob()
+func (c *Client) resumeJob(jobID string) (uint64, error) {
+	request, err := http.NewRequest("GET", c.args.Url+"/resume", nil)
 	if err != nil {
-		return err
+		return 0, err
+	}
+	var client http.Client
+
+	// set the job id we're going to resume
+	request.Header.Set("Job", jobID)
+	// add additional headers if here are any
+	for key, value := range c.additionalHeaders {
+		request.Header.Set(key, value)
+	}
+
+	resp, err := client.Do(request)
+	if err != nil {
+		return 0, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	// make sure body is valid uint64
+	return strconv.ParseUint(string(body), 10, 64)
+}
+
+func (c *Client) uploadStream() error {
+	// start a new job unless we're resuming
+	var jobID string
+	var skip uint64
+	if c.args.ResumeJobID == "" {
+		var err error
+		jobID, err = c.newJob()
+		if err != nil {
+			return err
+		}
+	} else {
+		jobID = c.args.ResumeJobID
+		var err error
+		skip, err = c.resumeJob(jobID)
+		if err != nil {
+			return err
+		}
 	}
 
 	stdinReader := bufio.NewReaderSize(os.Stdin, c.args.ChunkSize)
+
+	// skip bytes if resuming
+	{
+		skipLeft := skip
+		for {
+			if skipLeft <= 0 {
+				break
+			}
+			skipped, err := stdinReader.Discard(int(skipLeft))
+			skipLeft -= uint64(skipped)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	// send all the data
 	{
 		b := backoff.NewExponentialBackOff()
@@ -217,6 +272,7 @@ func main() {
 	flag.StringVar(&args.Command, "command", "", "command to run on rpiped")
 	flag.StringVar(&args.AdditionalHeaders, "headers", "", "additional headers")
 	flag.IntVar(&args.ChunkSize, "chunk-size", 10, "chunk size (in MB) for requests")
+	flag.StringVar(&args.ResumeJobID, "resume-job-id", "", "resume job id instead of starting a new job")
 	flag.Parse()
 	args.ChunkSize *= 1024 * 1024
 	if err := validate(args); err != nil {

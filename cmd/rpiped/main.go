@@ -149,6 +149,12 @@ func (s *Server) new(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	w.WriteHeader(http.StatusOK)
+	log.Printf("created new job %s with command %s", jobName, command)
+	if _, err := w.Write([]byte(jobName)); err != nil {
+		log.Printf("%s - %v", "failed sending back created new job", err)
+	}
 }
 
 func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
