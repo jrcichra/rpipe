@@ -103,7 +103,6 @@ func (c *Client) handleHTTPSession(jobID string, reader *bufio.Reader) error {
 		chunkLen := chunkReader.Len()
 		var client http.Client
 		request.Header.Set("Job", jobID)
-		request.Header.Set("Command", c.args.Command)
 		request.Header.Set("Chunk-Size", strconv.Itoa(chunkLen))
 		request.Header.Set("Content-Type", "application/octet-stream")
 
@@ -133,15 +132,50 @@ func (c *Client) handleHTTPSession(jobID string, reader *bufio.Reader) error {
 	}
 }
 
+func (c *Client) newJob() (string, error) {
+	request, err := http.NewRequest("POST", c.args.Url+"/new", nil)
+	if err != nil {
+		return "", err
+	}
+	var client http.Client
+
+	// send the command we're going to run
+	request.Header.Set("Command", c.args.Command)
+	// add additional headers if here are any
+	for key, value := range c.additionalHeaders {
+		request.Header.Set(key, value)
+	}
+
+	resp, err := client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	// make sure body is valid uuid
+	sBody := string(body)
+	if _, err := uuid.Parse(sBody); err != nil {
+		return "", err
+	}
+	return sBody, nil
+}
+
 func (c *Client) uploadStream() error {
-	jobID := uuid.New().String()
+	// start a new job (getting the uuid for it)
+	jobID, err := c.newJob()
+	if err != nil {
+		return err
+	}
+
 	stdinReader := bufio.NewReaderSize(os.Stdin, c.args.ChunkSize)
 	// send all the data
 	{
 		b := backoff.NewExponentialBackOff()
 		b.MaxElapsedTime = 0
 		b.MaxInterval = time.Minute * 1
-		backoff.Retry(func() error {
+		if err := backoff.Retry(func() error {
 			if err := c.handleHTTPSession(jobID, stdinReader); err != nil {
 				if err == io.EOF {
 					// we've hit the end
@@ -154,7 +188,9 @@ func (c *Client) uploadStream() error {
 			// hit the end in some other way
 			log.Println("shouldn't be here")
 			return nil
-		}, b)
+		}, b); err != nil {
+			return err
+		}
 	}
 
 	// tell the server we're done
@@ -162,13 +198,15 @@ func (c *Client) uploadStream() error {
 		b := backoff.NewExponentialBackOff()
 		b.MaxElapsedTime = 0
 		b.MaxInterval = time.Minute * 1
-		backoff.Retry(func() error {
+		if err := backoff.Retry(func() error {
 			if err := c.sendDone(jobID); err != nil {
 				log.Println(err)
 			}
 			// no error - server must know we're done
 			return nil
-		}, b)
+		}, b); err != nil {
+			return err
+		}
 	}
 	return nil
 }
