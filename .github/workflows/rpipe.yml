@@ -5,6 +5,7 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: ubuntu-latest
+    container: archlinux
     steps:
       - name: Checkout
         uses: actions/checkout@v3
