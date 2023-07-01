@@ -52,15 +52,13 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut stdin = std::io::stdin();
 
     // build a client
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .default_headers(additional_headers)
+        .user_agent("rpipe")
+        .build()?;
 
     // create a new job with a command
-    let resp = client
-        .post(&create_url)
-        .headers(additional_headers.clone())
-        .body(args.command)
-        .send()
-        .await?;
+    let resp = client.post(&create_url).body(args.command).send().await?;
 
     // make sure the request was successful
     if resp.status() != StatusCode::OK {
@@ -104,7 +102,6 @@ async fn main() -> Result<(), anyhow::Error> {
             let response_result = client
                 .post(&upload_url)
                 .body(buf)
-                .headers(additional_headers.clone())
                 .header(EXPECTED_SIZE_HEADER, bytes)
                 .header(JOB_ID_HEADER, &job_id)
                 .send()
@@ -139,7 +136,6 @@ async fn main() -> Result<(), anyhow::Error> {
     // tell the server we're done
     let resp = client
         .post(&done_url)
-        .headers(additional_headers.clone())
         .header(JOB_ID_HEADER, &job_id)
         .send()
         .await?;
