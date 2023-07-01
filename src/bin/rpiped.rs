@@ -83,7 +83,7 @@ async fn create(State(state): State<SharedServer>, command: String) -> Result<St
     // spawn the command into a child process
     let child = Command::new("sh")
         .arg("-c")
-        .arg(command)
+        .arg(command.clone())
         .stdin(Stdio::piped())
         .spawn()?;
 
@@ -97,6 +97,7 @@ async fn create(State(state): State<SharedServer>, command: String) -> Result<St
     state.write().unwrap().jobs.insert(job_id.clone(), job);
 
     // return the job id
+    info!("created job id {} with command {}", job_id, command);
     Ok(job_id)
 }
 
@@ -140,6 +141,8 @@ async fn upload(
 
     // send the bytes into the process
     stdin.write_all(&bytes)?;
+    // return the job id
+    info!("successfully processed chunk for job id {}", job_id);
     Ok("ok".to_string())
 }
 
@@ -165,5 +168,6 @@ async fn done(
 
     // wait for the job to end
     let status = job.child.wait().context("could not wait on child")?;
+    info!("successfully complete job id {}", job_id);
     Ok(format!("{}", status))
 }
