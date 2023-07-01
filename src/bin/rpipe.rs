@@ -6,7 +6,7 @@ use reqwest::{
     header::{HeaderMap, HeaderName},
     StatusCode,
 };
-use rpipe::consts::{COMMAND_HEADER, EXPECTED_SIZE_HEADER, JOB_ID_HEADER};
+use rpipe::consts::{EXPECTED_SIZE_HEADER, JOB_ID_HEADER};
 use std::{io::Read, thread, time::Duration};
 
 #[derive(Parser, Debug)]
@@ -58,7 +58,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let resp = client
         .post(&create_url)
         .headers(additional_headers.clone())
-        .header(COMMAND_HEADER, args.command)
+        .body(args.command)
         .send()
         .await?;
 

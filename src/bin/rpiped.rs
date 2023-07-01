@@ -9,7 +9,7 @@ use axum::{
 };
 use clap::Parser;
 use log::info;
-use rpipe::consts::{COMMAND_HEADER, EXPECTED_SIZE_HEADER, JOB_ID_HEADER};
+use rpipe::consts::{EXPECTED_SIZE_HEADER, JOB_ID_HEADER};
 use std::process::{Command, Stdio};
 use std::{collections::HashMap, io::Write, net::SocketAddr, sync::RwLock};
 use std::{process::Child, sync::Arc};
@@ -77,15 +77,8 @@ async fn main() {
         .unwrap();
 }
 
-async fn create(
-    State(state): State<SharedServer>,
-    headers: HeaderMap,
-) -> Result<String, ServerError> {
-    // find the command to run
-    let command = headers
-        .get(COMMAND_HEADER)
-        .context("could not find command header")?
-        .to_str()?;
+async fn create(State(state): State<SharedServer>, command: String) -> Result<String, ServerError> {
+    // the command is the text body of create
 
     // spawn the command into a child process
     let child = Command::new("sh")
