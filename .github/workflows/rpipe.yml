@@ -54,8 +54,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Install cross
         run: cargo install -f cross
-      - name: Build for all targets specified in parallel file
-        run: parallel < ci/parallel.jobs
+      - name: Build for x86
+        run: cross build --target x86_64-unknown-linux-gnu --release
+      - name: Build for aarch64
+        run: cross build --target aarch64-unknown-linux-gnu --release
       - uses: docker/build-push-action@v4
         with:
           context: .
