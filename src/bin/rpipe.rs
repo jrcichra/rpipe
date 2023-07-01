@@ -18,7 +18,7 @@ struct Args {
     headers: Option<String>,
     #[clap(long)]
     command: String,
-    #[clap( long,default_value_t= 10*1024)]
+    #[clap( long,default_value_t= 10 * 1024 * 1024)]
     chunk_size: usize,
     #[clap(long, default_value_t = 4000)]
     backoff: u64,
