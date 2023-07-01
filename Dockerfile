@@ -5,7 +5,8 @@ COPY target/x86_64-unknown-linux-gnu/release/rpiped rpiped-amd64
 COPY target/aarch64-unknown-linux-gnu/release/rpipe rpipe-arm64
 COPY target/x86_64-unknown-linux-gnu/release/rpipe rpipe-amd64
 
-FROM gcr.io/distroless/static-debian11:nonroot
+# busybox allows users to specify this as an initContainer in Kubernetes and copy the desired binary to a shared volume
+FROM busybox:1.36.1
 ARG TARGETARCH
 COPY --from=rename /app/rpiped-$TARGETARCH /app/rpiped
 COPY --from=rename /app/rpipe-$TARGETARCH /app/rpipe
