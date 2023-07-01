@@ -3,26 +3,6 @@ name: rpipe
 on: [push, pull_request]
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Repo metadata
-        id: repo
-        uses: actions/github-script@v6
-        with:
-          script: |
-            return context.repo.repo
-      - uses: actions/setup-go@v4
-        with:
-          go-version: "1.20.2"
-      - name: install pv
-        run: sudo apt-get update && sudo apt-get install -y pv
-      - name: Build Go binaries
-        run: ./build.sh
-      - name: Test
-        run: ./test.sh
   build:
     runs-on: ubuntu-latest
     steps:
@@ -34,11 +14,6 @@ jobs:
         with:
           script: |
             return context.repo.repo
-      - uses: actions/setup-go@v4
-        with:
-          go-version: "1.20.2"
-      - name: Build Go binaries
-        run: ./build.sh
       - name: Prepare
         id: prep
         run: |
@@ -71,19 +46,18 @@ jobs:
         uses: docker/setup-qemu-action@v2
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-      - name: Cache Docker layers
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
       - name: Login to ghcr.io
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install cross
+        run: cargo install -f cross
+      - name: Build for x86
+        run: cross build --target x86_64-unknown-linux-gnu --release
+      - name: Build for aarch64
+        run: cross build --target aarch64-unknown-linux-gnu --release
       - uses: docker/build-push-action@v4
         with:
           context: .
@@ -91,6 +65,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.prep.outputs.tags }}
+          cache-from: type=registry,ref=ghcr.io/jrcichra/bitwarden-secrets-operator:buildcache
+          cache-to: type=registry,ref=ghcr.io/jrcichra/bitwarden-secrets-operator:buildcache,mode=max
           labels: |
             org.opencontainers.image.title=${{ fromJson(steps.repo.outputs.result).name }}
             org.opencontainers.image.description=${{ fromJson(steps.repo.outputs.result).description }}
