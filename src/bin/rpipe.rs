@@ -64,7 +64,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .build()?;
 
     let mut job_id = args.resume;
-    if job_id != "" {
+    if job_id == "" {
         // create a new job with a command
         let resp = client.post(&create_url).body(args.command).send().await?;
 
