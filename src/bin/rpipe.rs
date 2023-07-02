@@ -26,6 +26,8 @@ struct Args {
     chunk_size: usize,
     #[clap(long, default_value_t = 4000)]
     backoff: u64,
+    #[clap(long, default_value = "")]
+    resume: String,
 }
 
 #[tokio::main]
@@ -61,22 +63,25 @@ async fn main() -> Result<(), anyhow::Error> {
         .user_agent("rpipe")
         .build()?;
 
-    // create a new job with a command
-    let resp = client.post(&create_url).body(args.command).send().await?;
+    let mut job_id = args.resume;
+    if job_id != "" {
+        // create a new job with a command
+        let resp = client.post(&create_url).body(args.command).send().await?;
 
-    // make sure the request was successful
-    if resp.status() != StatusCode::OK {
-        return Err(anyhow!(
-            "bad return code when making size. expected 200 OK, got {}. body:  {}",
-            resp.status(),
-            resp.text().await?
-        ));
-    }
+        // make sure the request was successful
+        if resp.status() != StatusCode::OK {
+            return Err(anyhow!(
+                "bad return code when making size. expected 200 OK, got {}. body:  {}",
+                resp.status(),
+                resp.text().await?
+            ));
+        }
 
-    // the text of the response is the job id
-    let job_id = resp.text().await?;
-    if job_id.len() <= 0 {
-        return Err(anyhow!("bad job id when creating",));
+        // the text of the response is the job id
+        job_id = resp.text().await?;
+        if job_id.len() <= 0 {
+            return Err(anyhow!("bad job id when creating",));
+        }
     }
 
     let mut reader = BufReader::new(stdin);
