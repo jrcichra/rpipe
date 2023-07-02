@@ -174,6 +174,6 @@ async fn done(
 
     // wait for the job to end
     let status = job.child.wait().context("could not wait on child")?;
-    info!("successfully complete job id {}", job_id);
+    info!("successfully completed job id {}", job_id);
     Ok(format!("{}", status))
 }
