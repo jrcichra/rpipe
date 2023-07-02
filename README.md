@@ -1,3 +1,3 @@
 # rpipe
 
-Resilient Pipes.
+Resilient nix pipes over HTTP.

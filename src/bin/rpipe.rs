@@ -133,10 +133,14 @@ async fn main() -> Result<(), anyhow::Error> {
 
             // make sure the request was successful
             if resp.status() != StatusCode::OK {
+                let status = resp.status();
+                let body = match resp.text().await {
+                    Ok(b) => b,
+                    Err(e) => format!("could not get text from body: {e}"),
+                };
                 info!(
                     "bad return code when uploading chunk. expected 200 OK, got {}. body: {}",
-                    resp.status(),
-                    resp.text().await?
+                    status, body,
                 );
                 thread::sleep(Duration::from_millis(args.backoff));
                 continue;
