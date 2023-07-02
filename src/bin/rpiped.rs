@@ -10,8 +10,11 @@ use axum::{
 use clap::Parser;
 use log::info;
 use rpipe::consts::{EXPECTED_SIZE_HEADER, JOB_ID_HEADER};
-use std::process::{Command, Stdio};
 use std::{collections::HashMap, io::Write, net::SocketAddr, sync::RwLock};
+use std::{
+    io::BufWriter,
+    process::{Command, Stdio},
+};
 use std::{process::Child, sync::Arc};
 use uuid::Uuid;
 
@@ -140,7 +143,10 @@ async fn upload(
         .context("could not get stdin for job")?;
 
     // send the bytes into the process
-    stdin.write_all(&bytes)?;
+
+    let mut writer = BufWriter::new(stdin);
+    writer.write_all(&bytes)?;
+    writer.flush()?;
     // return the job id
     info!("successfully processed chunk for job id {}", job_id);
     Ok("ok".to_string())

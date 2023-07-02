@@ -7,7 +7,11 @@ use reqwest::{
     StatusCode,
 };
 use rpipe::consts::{EXPECTED_SIZE_HEADER, JOB_ID_HEADER};
-use std::{io::Read, thread, time::Duration};
+use std::{
+    io::{BufReader, Read},
+    thread,
+    time::Duration,
+};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -18,7 +22,7 @@ struct Args {
     headers: Option<String>,
     #[clap(long)]
     command: String,
-    #[clap( long,default_value_t= 10 * 1024 * 1024 * 1024)]
+    #[clap( long,default_value_t= 1 * 1024 * 1024)]
     chunk_size: usize,
     #[clap(long, default_value_t = 4000)]
     backoff: u64,
@@ -49,7 +53,7 @@ async fn main() -> Result<(), anyhow::Error> {
     }
 
     // attach to stdin
-    let mut stdin = std::io::stdin();
+    let stdin = std::io::stdin();
 
     // build a client
     let client = reqwest::Client::builder()
@@ -75,11 +79,22 @@ async fn main() -> Result<(), anyhow::Error> {
         return Err(anyhow!("bad job id when creating",));
     }
 
+    let mut reader = BufReader::new(stdin);
+
     // read chunks of stdin bytes
     loop {
         let mut buf = vec![0; args.chunk_size];
-        let bytes = stdin.read(&mut buf)?;
-        if bytes <= 0 {
+        let mut total_bytes = 0;
+        loop {
+            let bytes = reader.read(&mut buf[total_bytes..])?;
+            total_bytes += bytes;
+            if bytes <= 0 {
+                // End of input
+                break;
+            }
+        }
+
+        if total_bytes <= 0 {
             info!("complete");
             break;
         }
@@ -88,21 +103,21 @@ async fn main() -> Result<(), anyhow::Error> {
         // the data.
         // There's probably a better way of utilizing read
         // where this step wouldn't be necessary.
-        if bytes < args.chunk_size {
-            let mut b = Vec::with_capacity(bytes);
-            b.extend(&buf[0..bytes]);
+        if total_bytes < args.chunk_size {
+            let mut b = Vec::with_capacity(total_bytes);
+            b.extend(&buf[0..total_bytes]);
             buf = b;
         }
 
         // loop for every time a chunk errors out
         loop {
-            info!("uploading chunk...");
+            info!("uploading chunk of length: {}...", total_bytes);
             // clone the buffer because body() moves the data
             let buf = buf.clone();
             let response_result = client
                 .post(&upload_url)
                 .body(buf)
-                .header(EXPECTED_SIZE_HEADER, bytes)
+                .header(EXPECTED_SIZE_HEADER, total_bytes)
                 .header(JOB_ID_HEADER, &job_id)
                 .send()
                 .await;
