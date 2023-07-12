@@ -28,6 +28,8 @@ struct Args {
     backoff: u64,
     #[clap(long, default_value = "")]
     resume: String,
+    #[clap(long, default_value_t = 60)]
+    timeout: u64,
 }
 
 #[tokio::main]
@@ -61,6 +63,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let client = reqwest::Client::builder()
         .default_headers(additional_headers)
         .user_agent("rpipe")
+        .timeout(Duration::new(args.timeout, 0))
         .build()?;
 
     let mut job_id = args.resume;
