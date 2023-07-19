@@ -6,7 +6,7 @@ use reqwest::{
     header::{HeaderMap, HeaderName},
     StatusCode,
 };
-use rpipe::consts::{EXPECTED_SIZE_HEADER, JOB_ID_HEADER};
+use rpipe::consts::{EXPECTED_POSITION_HEADER, EXPECTED_SIZE_HEADER, JOB_ID_HEADER};
 use std::{
     io::{BufReader, Read},
     thread,
@@ -90,19 +90,23 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut reader = BufReader::new(stdin);
 
     // read chunks of stdin bytes
+    let mut position = 0;
     loop {
         let mut buf = vec![0; args.chunk_size];
-        let mut total_bytes = 0;
+        let mut bytes_read = 0;
         loop {
-            let bytes = reader.read(&mut buf[total_bytes..])?;
-            total_bytes += bytes;
+            let bytes = reader.read(&mut buf[bytes_read..])?;
+            bytes_read += bytes;
             if bytes <= 0 {
                 // End of input
                 break;
             }
         }
 
-        if total_bytes <= 0 {
+        // keeping track of how many bytes we've read
+        position += bytes_read;
+
+        if bytes_read <= 0 {
             info!("complete");
             break;
         }
@@ -111,21 +115,22 @@ async fn main() -> Result<(), anyhow::Error> {
         // the data.
         // There's probably a better way of utilizing read
         // where this step wouldn't be necessary.
-        if total_bytes < args.chunk_size {
-            let mut b = Vec::with_capacity(total_bytes);
-            b.extend(&buf[0..total_bytes]);
+        if bytes_read < args.chunk_size {
+            let mut b = Vec::with_capacity(bytes_read);
+            b.extend(&buf[0..bytes_read]);
             buf = b;
         }
 
         // loop for every time a chunk errors out
         loop {
-            info!("uploading chunk of length: {}...", total_bytes);
+            info!("uploading chunk of length: {}...", bytes_read);
             // clone the buffer because body() moves the data
             let buf = buf.clone();
             let response_result = client
                 .post(&upload_url)
                 .body(buf)
-                .header(EXPECTED_SIZE_HEADER, total_bytes)
+                .header(EXPECTED_SIZE_HEADER, bytes_read)
+                .header(EXPECTED_POSITION_HEADER, position)
                 .header(JOB_ID_HEADER, &job_id)
                 .send()
                 .await;

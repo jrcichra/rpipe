@@ -9,7 +9,7 @@ use axum::{
 };
 use clap::Parser;
 use log::info;
-use rpipe::consts::{EXPECTED_SIZE_HEADER, JOB_ID_HEADER};
+use rpipe::consts::{EXPECTED_POSITION_HEADER, EXPECTED_SIZE_HEADER, JOB_ID_HEADER};
 use std::{collections::HashMap, io::Write, net::SocketAddr, sync::RwLock};
 use std::{
     io::BufWriter,
@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 struct Job {
     child: Child,
+    position: usize,
 }
 
 #[derive(Default)]
@@ -94,7 +95,7 @@ async fn create(State(state): State<SharedServer>, command: String) -> Result<St
     let job_id = Uuid::new_v4().to_string();
 
     // build a new job with the job id
-    let job = Job { child };
+    let job = Job { child, position: 0 };
 
     // add the job to our state
     state.write().unwrap().jobs.insert(job_id.clone(), job);
@@ -120,6 +121,12 @@ async fn upload(
         .to_str()?
         .parse::<usize>()?;
 
+    let expected_position = headers
+        .get(EXPECTED_POSITION_HEADER)
+        .context("could not process position header")?
+        .to_str()?
+        .parse::<usize>()?;
+
     // make sure the length of bytes in the body is what we expected to get
     if bytes.len() != expected_size {
         return Err(ServerError(anyhow!(
@@ -136,6 +143,16 @@ async fn upload(
         .get_mut(job_id)
         .context("could not find job id in memory")?;
 
+    // make sure the position matches what we want
+    let our_expected_position = job.position + expected_size;
+    if expected_position != our_expected_position {
+        return Err(ServerError(anyhow!(
+            "unexpected position. expected {}, got {}",
+            our_expected_position,
+            expected_position
+        )));
+    }
+
     let stdin = job
         .child
         .stdin
@@ -147,6 +164,10 @@ async fn upload(
     let mut writer = BufWriter::new(stdin);
     writer.write_all(&bytes)?;
     writer.flush()?;
+
+    // update the job with the new position
+    job.position = our_expected_position;
+
     // return the job id
     info!("successfully processed chunk for job id {}", job_id);
     Ok("ok".to_string())
