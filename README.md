@@ -1,6 +1,6 @@
 # rpipe
 
-Resilient nix pipes over HTTP.
+Resilient pipes over HTTP.
 
 ### How it works
 
@@ -17,6 +17,12 @@ Using HTTP enables the easy use of zero trust frameworks like [Cloudflare Access
 When the network connection is broken, the client retries sending the chunk until it's successful.
 
 The goal is to have a resilient, flexible, never give up tool that wouldn't care if you went missing for a week (assuming both systems didn't reboot).
+
+### Getting started
+
+`cargo build --release` will provide a copy of `rpipe` and `rpiped` for your system.
+
+You can also extract binaries from the container image built on each commit.
 
 # Bugs
 
