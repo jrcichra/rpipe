@@ -25,9 +25,3 @@ The goal is to have a resilient, flexible, never give up tool that wouldn't care
 `cargo build --release` will provide a copy of `rpipe` and `rpiped` for your system.
 
 You can also extract binaries from the container image built on each commit.
-
-# Bugs
-
-There is an intermittent issue where a chunk of the data is accepted and forwarded to the server process but not acknowledged by the client. This might be due to something like Cloudflare successfully giving the backend all the data but the response doesn't make it to my client intact.
-
-For now I've made it so the stream tracks the progress and will fail if there's a mismatch in position. But this is something which will be investigated further as time goes on. A potential remediation might be to recognize a chunk jump and skip ahead on the client.

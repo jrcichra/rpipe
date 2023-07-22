@@ -7,6 +7,7 @@ use reqwest::{
     StatusCode,
 };
 use rpipe::consts::{EXPECTED_POSITION_HEADER, EXPECTED_SIZE_HEADER, JOB_ID_HEADER};
+use serde_json::{json, Value};
 use std::{
     io::{BufReader, Read},
     thread,
@@ -147,14 +148,43 @@ async fn main() -> Result<(), anyhow::Error> {
             // make sure the request was successful
             if resp.status() != StatusCode::OK {
                 let status = resp.status();
-                let body = match resp.text().await {
+                let json = match resp.json::<serde_json::Value>().await {
                     Ok(b) => b,
-                    Err(e) => format!("could not get text from body: {e}"),
+                    Err(e) => json!({"error":format!("could not get text from body: {e}")}),
                 };
                 info!(
-                    "bad return code when uploading chunk. expected 200 OK, got {}. body: {}",
-                    status, body,
+                    "bad return code when uploading chunk. expected 200 OK, got {}. json: {}",
+                    status, json,
                 );
+
+                // check for an edge case where the server actually got our last request and we need to skip ahead a chunk.
+                // use a function to make use of ? for syntax
+                fn check_for_skip(json: Value, chunk_size: usize) -> Result<bool, anyhow::Error> {
+                    let expected = json
+                        .get("expected".to_string())
+                        .context("could not find expected")?
+                        .as_str()
+                        .context("expected was not a string")?
+                        .parse::<usize>()?;
+                    let received = json
+                        .get("received".to_string())
+                        .context("could not find received")?
+                        .as_str()
+                        .context("received was not a string")?
+                        .parse::<usize>()?;
+                    if expected - chunk_size == received {
+                        return Ok(true);
+                    }
+                    Ok(false)
+                }
+
+                if let Ok(skip) = check_for_skip(json, args.chunk_size) {
+                    if skip {
+                        info!("server is already a chunk ahead, skipping chunk");
+                        break;
+                    }
+                }
+
                 thread::sleep(Duration::from_millis(args.backoff));
                 continue;
             }

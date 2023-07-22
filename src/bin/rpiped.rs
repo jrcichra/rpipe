@@ -5,7 +5,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::post,
-    Router,
+    Json, Router,
 };
 use clap::Parser;
 use log::info;
@@ -29,16 +29,21 @@ struct Server {
 }
 
 // Make our own error that wraps `anyhow::Error`.
-struct ServerError(anyhow::Error);
+struct ServerError {
+    error: anyhow::Error,
+    details: Option<HashMap<String, String>>,
+}
 
 // Tell axum how to convert `AppError` into a response.
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Something went wrong: {}", self.0),
-        )
-            .into_response()
+        // add details if there are any
+        let mut json_data = HashMap::new();
+        if let Some(details) = self.details {
+            json_data = details;
+        }
+        json_data.insert("error".to_string(), self.error.to_string());
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json_data)).into_response()
     }
 }
 
@@ -49,7 +54,10 @@ where
     E: Into<anyhow::Error>,
 {
     fn from(err: E) -> Self {
-        Self(err.into())
+        Self {
+            error: err.into(),
+            details: None, // no details on a plain anyhow
+        }
     }
 }
 
@@ -121,19 +129,26 @@ async fn upload(
         .to_str()?
         .parse::<usize>()?;
 
-    let expected_position = headers
+    let client_expected_position = headers
         .get(EXPECTED_POSITION_HEADER)
         .context("could not process position header")?
         .to_str()?
         .parse::<usize>()?;
 
     // make sure the length of bytes in the body is what we expected to get
-    if bytes.len() != expected_size {
-        return Err(ServerError(anyhow!(
-            "unexpected size. expected {}, got {}",
-            expected_size,
-            bytes.len()
-        )));
+    let received_size = bytes.len();
+    if received_size != expected_size {
+        let mut details = HashMap::new();
+        details.insert("expected".to_string(), expected_size.to_string());
+        details.insert("received".to_string(), received_size.to_string());
+        return Err(ServerError {
+            details: Some(details),
+            error: anyhow!(
+                "unexpected size. expected {}, received {}",
+                expected_size,
+                received_size
+            ),
+        });
     }
 
     // find the job from this job_id and get a reference to stdin
@@ -145,12 +160,18 @@ async fn upload(
 
     // make sure the position matches what we want
     let our_expected_position = job.position + expected_size;
-    if expected_position != our_expected_position {
-        return Err(ServerError(anyhow!(
-            "unexpected position. expected {}, got {}",
-            our_expected_position,
-            expected_position
-        )));
+    if client_expected_position != our_expected_position {
+        let mut details = HashMap::new();
+        details.insert("expected".to_string(), our_expected_position.to_string());
+        details.insert("received".to_string(), client_expected_position.to_string());
+        return Err(ServerError {
+            details: Some(details),
+            error: anyhow!(
+                "unexpected position. expected {}, received {}",
+                our_expected_position,
+                client_expected_position
+            ),
+        });
     }
 
     let stdin = job
