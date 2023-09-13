@@ -64,7 +64,7 @@ jobs:
           use-cross: true
           command: build
           args: --target x86_64-unknown-linux-musl --release
-      - uses: docker/build-push-action@v4
+      - uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
