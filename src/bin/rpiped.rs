@@ -10,12 +10,13 @@ use axum::{
 use clap::Parser;
 use log::info;
 use rpipe::consts::{EXPECTED_POSITION_HEADER, EXPECTED_SIZE_HEADER, JOB_ID_HEADER};
-use std::{collections::HashMap, io::Write, net::SocketAddr, sync::RwLock};
+use std::{collections::HashMap, io::Write, sync::RwLock};
 use std::{
     io::BufWriter,
     process::{Command, Stdio},
 };
 use std::{process::Child, sync::Arc};
+use tokio::net::TcpListener;
 use uuid::Uuid;
 
 struct Job {
@@ -43,10 +44,16 @@ impl IntoResponse for ServerError {
             json_data = details;
         }
         json_data.insert("error".to_string(), self.error.to_string());
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json_data)).into_response()
+
+        // Make a response but then just extract the body so we can wrap what we want around it
+        // TODO: make this less of a hack
+        let response = Json(json_data).into_response();
+        Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR.as_u16())
+            .body(response.into_body())
+            .unwrap()
     }
 }
-
 // This enables using `?` on functions that return `Result<_, anyhow::Error>` to turn them into
 // `Result<_, AppError>`. That way you don't need to do that manually.
 impl<E> From<E> for ServerError
@@ -81,12 +88,11 @@ async fn main() {
         .route("/upload", post(upload))
         .route("/done", post(done))
         .with_state(Arc::clone(&server));
-    let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
-    info!("listening on {}", addr);
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+
+    let bind = format!("0.0.0.0:{}", args.port);
+    info!("listening on {}", &bind);
+    let listener = TcpListener::bind(&bind).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
 
 async fn create(State(state): State<SharedServer>, command: String) -> Result<String, ServerError> {

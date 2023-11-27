@@ -1,9 +1,8 @@
 use anyhow::{anyhow, Context};
-use axum::http::HeaderValue;
 use clap::Parser;
 use log::info;
 use reqwest::{
-    header::{HeaderMap, HeaderName},
+    header::{HeaderMap, HeaderName, HeaderValue},
     StatusCode,
 };
 use rpipe::consts::{EXPECTED_POSITION_HEADER, EXPECTED_SIZE_HEADER, JOB_ID_HEADER};
