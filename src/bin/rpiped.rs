@@ -73,7 +73,7 @@ type SharedServer = Arc<RwLock<Server>>;
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    #[clap(long, default_value_t = 3000)]
+    #[clap(long, env, default_value_t = 3000)]
     port: u16,
 }
 

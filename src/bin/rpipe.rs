@@ -16,19 +16,19 @@ use std::{
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    #[clap(long)]
+    #[clap(long, env)]
     url: String,
-    #[clap(long)]
+    #[clap(long, env)]
     headers: Option<String>,
-    #[clap(long)]
+    #[clap(long, env)]
     command: String,
-    #[clap( long,default_value_t= 1 * 1024 * 1024)]
+    #[clap(long, env, default_value_t= 1 * 1024 * 1024)]
     chunk_size: usize,
-    #[clap(long, default_value_t = 4000)]
+    #[clap(long, env, default_value_t = 4000)]
     backoff: u64,
-    #[clap(long, default_value = "")]
+    #[clap(long, env, default_value = "")]
     resume: String,
-    #[clap(long, default_value_t = 60)]
+    #[clap(long, env, default_value_t = 60)]
     timeout: u64,
 }
 
