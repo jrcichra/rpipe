@@ -15,6 +15,6 @@ tokio-util = { version = "0.7", features = ["io"] }
 uuid = { version = "1.7.0", features = ["v4"] }
 clap = { version = "4.5.2", features = ["derive", "env"] }
 simple_logger = "4.3.3"
-reqwest = { version = "0.11.24", features = ["json"] }
+reqwest = { version = "0.11.25", features = ["json"] }
 openssl = { version = "0.10", features = ["vendored"] }
 serde_json = "1.0.114"
