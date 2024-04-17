@@ -17,4 +17,4 @@ clap = { version = "4.5.4", features = ["derive", "env"] }
 simple_logger = "4.3.3"
 reqwest = { version = "0.12.3", features = ["json"] }
 openssl = { version = "0.10", features = ["vendored"] }
-serde_json = "1.0.115"
+serde_json = "1.0.116"
